@@ -34,6 +34,21 @@ class Scheduler:
             if self.manager.database.get_setting(key) is None:
                 await self.manager.send_daily_summary()
                 self.manager.database.set_setting(key, "sent")
+        if now.strftime("%H:%M") == "21:00":
+            key = f"habit-reminder:{now.date().isoformat()}"
+            if self.manager.database.get_setting(key) is None:
+                if self.manager.settings.telegram_ready:
+                    reply_markup = {
+                        "inline_keyboard": [
+                            [{"text": "Log Habits Now", "callback_data": "log_habit_menu"}],
+                        ]
+                    }
+                    await self.manager.telegram.send_message(
+                        self.manager.settings.telegram_allowed_user_id, 
+                        "Good evening! Time to log your daily habits.",
+                        reply_markup=reply_markup
+                    )
+                self.manager.database.set_setting(key, "sent")
 
     def stop(self) -> None:
         self._running = False

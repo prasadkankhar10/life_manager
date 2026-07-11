@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from html import escape
 
 from app.config import Settings
@@ -63,6 +63,13 @@ class LifeManager:
     async def store_item(self, item: ParsedItem) -> str:
         if not self.settings.notion_ready:
             return "Notion is not connected yet. Complete the Notion setup in the project README, then try again."
+        
+        if item.item_type == "habit":
+            try:
+                return await self._update_or_create_habit(item)
+            except NotionError as error:
+                return f"I could not save your habit to Notion: {escape(str(error))}"
+                
         data_source_id = self.settings.data_sources[item.item_type]
         try:
             page = await self.notion.create_page(
@@ -134,6 +141,8 @@ class LifeManager:
             return await self.today_tasks()
         if item.query_kind == "expenses_month":
             return await self.monthly_expenses()
+        if item.query_kind == "habit_review":
+            return await self.habit_review()
         return HELP_TEXT
 
     async def today_tasks(self) -> str:
@@ -179,6 +188,137 @@ class LifeManager:
         expenses = result.get("results", [])
         total = sum((page.get("properties", {}).get("Amount", {}).get("number") or 0) for page in expenses)
         return f"<b>This month</b>\n{len(expenses)} expenses · ₹{total:,.2f}"
+
+    async def habit_review(self) -> str:
+        if not self.settings.ai_ready:
+            return "AI is not enabled. Cannot generate habit review."
+            
+        today = datetime.strptime(self.settings.logical_today(), "%Y-%m-%d").date()
+        week_ago = (today - timedelta(days=7)).isoformat()
+        
+        payload = {
+            "filter": {"and": [
+                {"property": "Date", "date": {"on_or_after": week_ago}},
+                {"property": "Date", "date": {"on_or_before": today.isoformat()}},
+            ]},
+            "page_size": 14,
+            "sorts": [{"property": "Date", "direction": "ascending"}],
+        }
+        try:
+            result = await self.notion.query_data_source(self.settings.notion_habits_data_source_id, payload)
+        except NotionError as error:
+            return f"I could not read your habits: {escape(str(error))}"
+            
+        pages = result.get("results", [])
+        if not pages:
+            return "You haven't logged any habits in the past 7 days to review!"
+            
+        lines = []
+        for p in pages:
+            props = p.get("properties", {})
+            date = props.get("Date", {}).get("date", {}).get("start", "")
+            def get_num(prop): return props.get(prop, {}).get("number") or 0
+            
+            line = f"Date: {date}"
+            cs = get_num("Creative Skill")
+            dsa = get_num("DSA / Software Engineering")
+            dw = get_num("Deep Work")
+            eng = get_num("English Practice / Reading")
+            ex = get_num("Exercise Time")
+            gd = get_num("Game Dev")
+            energy = props.get("Energy Level", {}).get("select", {}).get("name", "") if props.get("Energy Level", {}).get("select") else ""
+            impulse = props.get("Fab / Impulse Urge", {}).get("select", {}).get("name", "") if props.get("Fab / Impulse Urge", {}).get("select") else ""
+            
+            if cs: line += f", Creative: {cs}m"
+            if dsa: line += f", DSA: {dsa}m"
+            if dw: line += f", DeepWork: {dw}m"
+            if eng: line += f", English: {eng}m"
+            if ex: line += f", Exercise: {ex}m"
+            if gd: line += f", GameDev: {gd}m"
+            if energy: line += f", Energy: {energy}"
+            if impulse: line += f", Impulse: {impulse}"
+            lines.append(line)
+            
+        habit_text = "\n".join(lines)
+        prompt = f"Here is my habit tracking data for the last 7 days:\n{habit_text}\n\nAnalyze this data and provide a brief, encouraging review of my progress. Highlight 1 or 2 specific areas I can improve on. Keep it short (max 4 sentences)."
+        
+        import httpx
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.settings.gemini_model}:generateContent?key={self.settings.gemini_api_key}"
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(url, json={"contents": [{"parts": [{"text": prompt}]}]})
+            resp.raise_for_status()
+            ai_reply = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+            return f"<b>Weekly Habit Review</b>\n\n{escape(ai_reply)}"
+        except Exception as e:
+            import logging
+            logging.error(f"Habit review AI failed: {e}", exc_info=True)
+            return "Sorry, I couldn't generate an AI review right now."
+
+    async def _update_or_create_habit(self, item: ParsedItem) -> str:
+        data_source_id = self.settings.data_sources["habit"]
+        date_str = item.date or self.settings.logical_today()
+        
+        payload = {
+            "filter": {"property": "Date", "date": {"equals": date_str}},
+            "page_size": 1
+        }
+        result = await self.notion.query_data_source(data_source_id, payload)
+        pages = result.get("results", [])
+        
+        new_props = {
+            "Name": title(date_str), "Date": date_value(date_str), "Source": select("Telegram"),
+        }
+        
+        if pages:
+            page = pages[0]
+            props = page.get("properties", {})
+            page_id = page["id"]
+            
+            def add_num(prop_name, new_val):
+                if new_val is not None:
+                    old_val = props.get(prop_name, {}).get("number") or 0
+                    new_props[prop_name] = number(old_val + new_val)
+                    
+            add_num("Creative Skill", item.creative_skill_minutes)
+            add_num("DSA / Software Engineering", item.dsa_minutes)
+            add_num("Deep Work", item.deep_work_minutes)
+            add_num("English Practice / Reading", item.english_minutes)
+            add_num("Exercise Time", item.exercise_minutes)
+            add_num("Game Dev", item.game_dev_minutes)
+            
+            if item.exercise_type:
+                old_ex = "".join(p.get("plain_text", "") for p in props.get("Exercise Type", {}).get("rich_text", []))
+                merged_ex = f"{old_ex}, {item.exercise_type}" if old_ex else item.exercise_type
+                new_props["Exercise Type"] = text(merged_ex)
+                
+            if item.energy_level:
+                new_props["Energy Level"] = select(item.energy_level)
+            if item.impulse_urge:
+                new_props["Fab / Impulse Urge"] = select(item.impulse_urge)
+            if item.mood_tags:
+                old_tags = [t.get("name") for t in props.get("Mood", {}).get("multi_select", [])]
+                merged_tags = list(set(old_tags + item.mood_tags))
+                new_props["Mood"] = multi_select(merged_tags)
+                
+            updated_page = await self.notion.update_page(page_id, new_props)
+            page_url = updated_page.get("url", "")
+            return f"Updated your daily tracker for {date_str}. <a href=\"{page_url}\">View in Notion</a>"
+        else:
+            if item.creative_skill_minutes is not None: new_props["Creative Skill"] = number(item.creative_skill_minutes)
+            if item.dsa_minutes is not None: new_props["DSA / Software Engineering"] = number(item.dsa_minutes)
+            if item.deep_work_minutes is not None: new_props["Deep Work"] = number(item.deep_work_minutes)
+            if item.english_minutes is not None: new_props["English Practice / Reading"] = number(item.english_minutes)
+            if item.exercise_minutes is not None: new_props["Exercise Time"] = number(item.exercise_minutes)
+            if item.game_dev_minutes is not None: new_props["Game Dev"] = number(item.game_dev_minutes)
+            if item.exercise_type: new_props["Exercise Type"] = text(item.exercise_type)
+            if item.energy_level: new_props["Energy Level"] = select(item.energy_level)
+            if item.impulse_urge: new_props["Fab / Impulse Urge"] = select(item.impulse_urge)
+            if item.mood_tags: new_props["Mood"] = multi_select(item.mood_tags)
+            
+            created_page = await self.notion.create_page(data_source_id, new_props)
+            page_url = created_page.get("url", "")
+            return f"Started a new daily tracker for {date_str}. <a href=\"{page_url}\">View in Notion</a>"
 
     async def send_daily_summary(self) -> None:
         if not self.settings.telegram_ready:

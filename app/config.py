@@ -50,6 +50,7 @@ class Settings:
     notion_notes_data_source_id: str
     notion_journal_data_source_id: str
     notion_goals_data_source_id: str
+    notion_habits_data_source_id: str
     gemini_api_key: str
     gemini_model: str
     gemini_enabled: bool
@@ -58,6 +59,10 @@ class Settings:
     @property
     def tzinfo(self) -> ZoneInfo:
         return ZoneInfo(self.timezone)
+
+    def logical_today(self) -> str:
+        from datetime import datetime, timedelta
+        return (datetime.now(self.tzinfo) - timedelta(hours=4)).date().isoformat()
 
     @property
     def notion_ready(self) -> bool:
@@ -79,6 +84,7 @@ class Settings:
             "note": self.notion_notes_data_source_id,
             "journal": self.notion_journal_data_source_id,
             "goal": self.notion_goals_data_source_id,
+            "habit": self.notion_habits_data_source_id,
         }
 
     def readiness(self) -> dict[str, bool]:
@@ -112,6 +118,7 @@ def load_settings() -> Settings:
         notion_notes_data_source_id=_env("NOTION_NOTES_DATA_SOURCE_ID"),
         notion_journal_data_source_id=_env("NOTION_JOURNAL_DATA_SOURCE_ID"),
         notion_goals_data_source_id=_env("NOTION_GOALS_DATA_SOURCE_ID"),
+        notion_habits_data_source_id=_env("NOTION_HABITS_DATA_SOURCE_ID"),
         gemini_api_key=_env("GEMINI_API_KEY"),
         gemini_model=_env("GEMINI_MODEL", "gemini-2.5-flash"),
         gemini_enabled=_as_bool(_env("GEMINI_ENABLED", "true")),

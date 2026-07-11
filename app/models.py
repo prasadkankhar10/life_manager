@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Literal
 
 
-ItemType = Literal["task", "expense", "note", "journal", "goal", "query", "help"]
+ItemType = Literal["task", "expense", "note", "journal", "goal", "query", "help", "habit"]
 
 
 @dataclass
@@ -23,6 +23,16 @@ class ParsedItem:
     query_kind: str = ""
     needs_clarification: bool = False
     clarification: str = ""
+    creative_skill_minutes: float | None = None
+    dsa_minutes: float | None = None
+    deep_work_minutes: float | None = None
+    english_minutes: float | None = None
+    exercise_minutes: float | None = None
+    exercise_type: str = ""
+    game_dev_minutes: float | None = None
+    energy_level: str = ""
+    impulse_urge: str = ""
+    mood_tags: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)

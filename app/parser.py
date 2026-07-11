@@ -54,7 +54,7 @@ Never invent dates, amounts, priority, mood, or categories. If an essential ambi
         gemini_schema = {
             "type": "object",
             "properties": {
-                "item_type": {"type": "string", "enum": ["task", "expense", "note", "journal", "goal", "query", "help"]},
+                "item_type": {"type": "string", "enum": ["task", "expense", "note", "journal", "goal", "query", "help", "habit"]},
                 "title": {"type": "string"},
                 "body": {"type": "string"},
                 "date": {"type": "string"},
@@ -64,7 +64,17 @@ Never invent dates, amounts, priority, mood, or categories. If an essential ambi
                 "priority": {"type": "string", "enum": ["None", "High", "Medium", "Low"]},
                 "mood": {"type": "string", "enum": ["None", "Great", "Good", "Okay", "Low"]},
                 "tags": {"type": "array", "items": {"type": "string"}},
-                "query_kind": {"type": "string", "enum": ["None", "today", "tasks", "expenses_month", "reminders"]},
+                "query_kind": {"type": "string", "enum": ["None", "today", "tasks", "expenses_month", "reminders", "habit_review"]},
+                "creative_skill_minutes": {"type": "number", "nullable": True},
+                "dsa_minutes": {"type": "number", "nullable": True},
+                "deep_work_minutes": {"type": "number", "nullable": True},
+                "english_minutes": {"type": "number", "nullable": True},
+                "exercise_minutes": {"type": "number", "nullable": True},
+                "exercise_type": {"type": "string"},
+                "game_dev_minutes": {"type": "number", "nullable": True},
+                "energy_level": {"type": "string", "enum": ["None", "good", "low", "middle", "high"]},
+                "impulse_urge": {"type": "string", "enum": ["None", "none", "low", "middle", "high", "failed"]},
+                "mood_tags": {"type": "array", "items": {"type": "string"}},
                 "needs_clarification": {"type": "boolean"},
                 "clarification": {"type": "string"},
             },
@@ -101,6 +111,9 @@ Never invent dates, amounts, priority, mood, or categories. If an essential ambi
         if item.priority == "None": item.priority = ""
         if item.mood == "None": item.mood = ""
         if item.query_kind == "None": item.query_kind = ""
+        if item.energy_level == "None": item.energy_level = ""
+        if item.impulse_urge == "None": item.impulse_urge = ""
+        if item.impulse_urge == "none": item.impulse_urge = "None" # Map the string literal 'none' to Notion Select 'None' if needed
         if item.reminder_at:
             item.reminder_at = _normalise_reminder(item.reminder_at, self.timezone)
         return item
@@ -148,6 +161,8 @@ class MessageParser:
             return ParsedItem("journal", _short_title(rest, "Journal entry"), body=rest, date=_today(self.settings))
         if command == "/goal":
             return ParsedItem("goal", rest or "Untitled goal", body=rest)
+        if command == "/habit":
+            return ParsedItem("habit", "Habit log", body=rest, date=_today(self.settings))
         if command == "/expense":
             return self._expense(rest, force=True)
         return ParsedItem("help", "Help")
@@ -190,18 +205,19 @@ class MessageParser:
 
 
 def _today(settings: Settings) -> str:
-    return datetime.now(settings.tzinfo).date().isoformat()
+    return settings.logical_today()
 
 
 def _simple_date(message: str, settings: Settings) -> str:
     match = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", message)
     if match:
         return match.group(1)
-    now = datetime.now(settings.tzinfo).date()
+    
+    today_date = datetime.strptime(settings.logical_today(), "%Y-%m-%d").date()
     if re.search(r"\btomorrow\b", message, flags=re.I):
-        return (now + timedelta(days=1)).isoformat()
+        return (today_date + timedelta(days=1)).isoformat()
     if re.search(r"\btoday\b", message, flags=re.I):
-        return now.isoformat()
+        return today_date.isoformat()
     return ""
 
 

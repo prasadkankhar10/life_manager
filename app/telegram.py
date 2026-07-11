@@ -29,17 +29,17 @@ class TelegramClient:
             raise TelegramError(body.get("description", "Telegram request failed"))
         return body.get("result")
 
-    async def send_message(self, chat_id: int, text: str) -> Any:
-        return await self.call(
-            "sendMessage",
-            {"chat_id": chat_id, "text": text[:4096], "parse_mode": "HTML", "disable_web_page_preview": True},
-        )
+    async def send_message(self, chat_id: int, text: str, reply_markup: dict[str, Any] | None = None) -> Any:
+        payload: dict[str, Any] = {"chat_id": chat_id, "text": text[:4096], "parse_mode": "HTML", "disable_web_page_preview": True}
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        return await self.call("sendMessage", payload)
 
     async def get_me(self) -> Any:
         return await self.call("getMe")
 
     async def set_webhook(self, url: str, secret_token: str) -> Any:
-        payload: dict[str, Any] = {"url": url, "allowed_updates": ["message"]}
+        payload: dict[str, Any] = {"url": url, "allowed_updates": ["message", "callback_query"]}
         if secret_token:
             payload["secret_token"] = secret_token
         return await self.call("setWebhook", payload)
@@ -48,7 +48,7 @@ class TelegramClient:
         return await self.call("deleteWebhook", {"drop_pending_updates": False})
 
     async def get_updates(self, offset: int | None) -> list[dict[str, Any]]:
-        payload: dict[str, Any] = {"timeout": 25, "allowed_updates": ["message"]}
+        payload: dict[str, Any] = {"timeout": 25, "allowed_updates": ["message", "callback_query"]}
         if offset is not None:
             payload["offset"] = offset
         return await self.call("getUpdates", payload, timeout=35)

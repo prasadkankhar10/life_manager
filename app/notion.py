@@ -60,6 +60,10 @@ class NotionClient:
             payload["children"] = paragraph_blocks(body)
         return await self._request("POST", "/pages", json=payload)
 
+    async def update_page(self, page_id: str, properties: dict[str, Any]) -> dict[str, Any]:
+        payload: dict[str, Any] = {"properties": properties}
+        return await self._request("PATCH", f"/pages/{page_id}", json=payload)
+
     async def query_data_source(self, data_source_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._request("POST", f"/data_sources/{data_source_id}/query", json=payload)
 
@@ -156,6 +160,21 @@ def database_schemas() -> dict[str, dict[str, Any]]:
             "Target date": {"type": "date", "date": {}},
             "Area": {"type": "select", "select": {"options": []}},
             "Notes": {"type": "rich_text", "rich_text": {}},
+            "Source": source,
+        },
+        "habit": {
+            "Name": {"type": "title", "title": {}},
+            "Date": {"type": "date", "date": {}},
+            "Creative Skill": {"type": "number", "number": {"format": "number"}},
+            "DSA / Software Engineering": {"type": "number", "number": {"format": "number"}},
+            "Deep Work": {"type": "number", "number": {"format": "number"}},
+            "English Practice / Reading": {"type": "number", "number": {"format": "number"}},
+            "Exercise Time": {"type": "number", "number": {"format": "number"}},
+            "Exercise Type": {"type": "rich_text", "rich_text": {}},
+            "Game Dev": {"type": "number", "number": {"format": "number"}},
+            "Energy Level": {"type": "select", "select": {"options": [{"name": "good", "color": "green"}, {"name": "low", "color": "red"}, {"name": "middle", "color": "yellow"}, {"name": "high", "color": "blue"}]}},
+            "Fab / Impulse Urge": {"type": "select", "select": {"options": [{"name": "none", "color": "green"}, {"name": "low", "color": "yellow"}, {"name": "middle", "color": "orange"}, {"name": "high", "color": "red"}, {"name": "failed", "color": "gray"}]}},
+            "Mood": {"type": "multi_select", "multi_select": {"options": []}},
             "Source": source,
         },
     }
