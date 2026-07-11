@@ -119,7 +119,9 @@ class MessageParser:
         if self.extractor:
             try:
                 return await self.extractor.extract(clean, datetime.now(self.settings.tzinfo))
-            except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
+            except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError) as e:
+                import logging
+                logging.error(f"AI Extractor failed: {e}", exc_info=True)
                 # Never reject a personal capture solely because an optional AI service failed.
                 pass
         return self._rules(clean)
