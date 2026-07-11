@@ -1,0 +1,222 @@
+from __future__ import annotations
+
+import json
+import re
+from datetime import datetime, timedelta
+from typing import Any
+
+import httpx
+
+from app.config import Settings
+from app.models import ParsedItem
+
+
+CAPTURE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "item_type": {"type": "string", "enum": ["task", "expense", "note", "journal", "goal", "query", "help"]},
+        "title": {"type": "string"},
+        "body": {"type": "string"},
+        "date": {"type": "string"},
+        "reminder_at": {"type": "string"},
+        "amount": {"type": ["number", "null"]},
+        "category": {"type": "string"},
+        "priority": {"type": "string", "enum": ["", "High", "Medium", "Low"]},
+        "mood": {"type": "string", "enum": ["", "Great", "Good", "Okay", "Low"]},
+        "tags": {"type": "array", "items": {"type": "string"}},
+        "query_kind": {"type": "string", "enum": ["", "today", "tasks", "expenses_month", "reminders"]},
+        "needs_clarification": {"type": "boolean"},
+        "clarification": {"type": "string"},
+    },
+    "required": [
+        "item_type", "title", "body", "date", "reminder_at", "amount", "category", "priority", "mood", "tags",
+        "query_kind", "needs_clarification", "clarification",
+    ],
+}
+
+
+class OpenAIExtractor:
+    def __init__(self, api_key: str, model: str, timezone) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.timezone = timezone
+
+    async def extract(self, message: str, now: datetime) -> ParsedItem:
+        instructions = f"""You are a careful private life-manager message parser.
+Today is {now.date().isoformat()} and the user's timezone is {now.tzinfo}.
+Classify the message and return only the requested JSON schema. Convert relative dates into ISO dates.
+For a task use date for its due date. For an explicit “remind me” request, set reminder_at to an ISO 8601 datetime with timezone; if the user gave a date but no time, use 09:00 in their timezone. If no date can be inferred, ask one brief clarification question.
+For expenses, extract a numeric amount without currency symbols and use today's date if the user says today or gives no date.
+For journal entries preserve the writing in body. For information requests use item_type=query and query_kind.
+Never invent dates, amounts, priority, mood, or categories. If an essential ambiguity prevents an action, set needs_clarification=true and ask one brief question in clarification.
+"""
+        payload = {
+            "model": self.model,
+            "store": False,
+            "instructions": instructions,
+            "input": message,
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "life_manager_capture",
+                    "strict": True,
+                    "schema": CAPTURE_SCHEMA,
+                }
+            },
+        }
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post("https://api.openai.com/v1/responses", headers=headers, json=payload)
+        response.raise_for_status()
+        payload = response.json()
+        output_text = payload.get("output_text", "")
+        if not output_text:
+            output_text = "".join(
+                content.get("text", "")
+                for output in payload.get("output", [])
+                for content in output.get("content", [])
+                if content.get("type") == "output_text"
+            )
+        if not output_text:
+            raise ValueError("AI response did not include structured text")
+        item = ParsedItem(**json.loads(output_text))
+        if item.reminder_at:
+            item.reminder_at = _normalise_reminder(item.reminder_at, self.timezone)
+        return item
+
+
+class MessageParser:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.extractor = OpenAIExtractor(settings.openai_api_key, settings.openai_model, settings.tzinfo) if settings.ai_ready else None
+
+    async def parse(self, message: str) -> ParsedItem:
+        clean = message.strip()
+        command = self._command(clean)
+        if command:
+            return command
+        if self.extractor:
+            try:
+                return await self.extractor.extract(clean, datetime.now(self.settings.tzinfo))
+            except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
+                # Never reject a personal capture solely because an optional AI service failed.
+                pass
+        return self._rules(clean)
+
+    def _command(self, message: str) -> ParsedItem | None:
+        if not message.startswith("/"):
+            return None
+        head, _, rest = message.partition(" ")
+        command = head.split("@", 1)[0].lower()
+        rest = rest.strip()
+        if command in {"/start", "/help"}:
+            return ParsedItem("help", "Help")
+        if command in {"/today", "/tasks"}:
+            return ParsedItem("query", "Today's tasks", query_kind="today")
+        if command == "/summary":
+            return ParsedItem("query", "Monthly expenses", query_kind="expenses_month")
+        if command == "/reminders":
+            return ParsedItem("query", "Upcoming reminders", query_kind="reminders")
+        if command == "/task":
+            return ParsedItem("task", rest or "Untitled task", body=rest)
+        if command == "/note":
+            return ParsedItem("note", _short_title(rest, "Note"), body=rest, date=_today(self.settings))
+        if command == "/journal":
+            return ParsedItem("journal", _short_title(rest, "Journal entry"), body=rest, date=_today(self.settings))
+        if command == "/goal":
+            return ParsedItem("goal", rest or "Untitled goal", body=rest)
+        if command == "/expense":
+            return self._expense(rest, force=True)
+        return ParsedItem("help", "Help")
+
+    def _rules(self, message: str) -> ParsedItem:
+        lower = message.lower()
+        if lower.startswith(("journal:", "journal -", "diary:")):
+            body = message.split(":", 1)[-1].strip()
+            return ParsedItem("journal", _short_title(body, "Journal entry"), body=body, date=_today(self.settings))
+        if lower.startswith(("idea:", "note:", "note -")):
+            body = message.split(":", 1)[-1].strip()
+            return ParsedItem("note", _short_title(body, "Note"), body=body, date=_today(self.settings))
+        if re.search(r"\b(spent|paid|cost|expense)\b", lower) and _amount(message) is not None:
+            return self._expense(message)
+        if lower.startswith(("remind me", "i need to", "todo:", "task:")):
+            title = re.sub(r"^(remind me( to)?|i need to|todo:|task:)\s*", "", message, flags=re.I).strip()
+            due_date = _simple_date(message, self.settings)
+            is_reminder = lower.startswith("remind me")
+            return ParsedItem(
+                "task", title or "Untitled task", body=message, date=due_date,
+                reminder_at=_default_reminder(due_date, self.settings) if is_reminder and due_date else "",
+                needs_clarification=is_reminder and not due_date,
+                clarification="When should I remind you?" if is_reminder and not due_date else "",
+            )
+        return ParsedItem("note", _short_title(message, "Note"), body=message, date=_today(self.settings))
+
+    def _expense(self, message: str, force: bool = False) -> ParsedItem:
+        amount = _amount(message)
+        if amount is None and force:
+            return ParsedItem(
+                "expense", "Expense", body=message, needs_clarification=True,
+                clarification="What amount should I record for this expense?",
+            )
+        remainder = re.sub(r"(?:₹|rs\.?|inr|\$)\s*[\d,]+(?:\.\d{1,2})?", "", message, flags=re.I).strip(" -:.")
+        category = _category(remainder)
+        return ParsedItem(
+            "expense", _short_title(remainder or "Expense", "Expense"), body=message,
+            amount=amount, category=category, date=_simple_date(message, self.settings) or _today(self.settings),
+        )
+
+
+def _today(settings: Settings) -> str:
+    return datetime.now(settings.tzinfo).date().isoformat()
+
+
+def _simple_date(message: str, settings: Settings) -> str:
+    match = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", message)
+    if match:
+        return match.group(1)
+    now = datetime.now(settings.tzinfo).date()
+    if re.search(r"\btomorrow\b", message, flags=re.I):
+        return (now + timedelta(days=1)).isoformat()
+    if re.search(r"\btoday\b", message, flags=re.I):
+        return now.isoformat()
+    return ""
+
+
+def _default_reminder(day: str, settings: Settings) -> str:
+    return datetime.fromisoformat(f"{day}T09:00:00").replace(tzinfo=settings.tzinfo).isoformat()
+
+
+def _normalise_reminder(value: str, timezone) -> str:
+    """Make an AI-supplied reminder safe for lexical SQLite comparison and scheduling."""
+    if "T" not in value:
+        return datetime.fromisoformat(f"{value}T09:00:00").replace(tzinfo=timezone).isoformat()
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone)
+    return parsed.isoformat()
+
+
+def _amount(message: str) -> float | None:
+    match = re.search(r"(?:₹|rs\.?|inr|\$)\s*([\d,]+(?:\.\d{1,2})?)", message, flags=re.I)
+    if not match:
+        return None
+    return float(match.group(1).replace(",", ""))
+
+
+def _category(value: str) -> str:
+    lowered = value.lower()
+    for category, words in {
+        "Food": ("lunch", "dinner", "breakfast", "coffee", "restaurant", "grocery", "groceries"),
+        "Transport": ("uber", "ola", "fuel", "petrol", "metro", "bus", "train"),
+        "Bills": ("rent", "electricity", "internet", "phone", "netflix"),
+        "Health": ("doctor", "medicine", "gym", "pharmacy"),
+    }.items():
+        if any(word in lowered for word in words):
+            return category
+    return "Other"
+
+
+def _short_title(value: str, fallback: str) -> str:
+    compact = " ".join(value.split())
+    return (compact[:117] + "...") if len(compact) > 120 else (compact or fallback)

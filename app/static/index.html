@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#173c38" />
+    <title>Life Manager — Control Room</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/assets/style.css" />
+  </head>
+  <body>
+    <div class="paper-noise" aria-hidden="true"></div>
+    <main class="shell">
+      <header class="masthead">
+        <a class="mark" href="/dashboard" aria-label="Life Manager home"><span>LM</span></a>
+        <div class="masthead-copy">
+          <p class="eyebrow">Personal system / private by design</p>
+          <h1>Life Manager</h1>
+        </div>
+        <div class="clock-block"><span id="local-date">—</span><b id="local-time">—</b></div>
+      </header>
+
+      <section class="hero-grid">
+        <div class="hero-copy">
+          <p class="kicker">Control room</p>
+          <h2>Catch the thought.<br /><em>Keep the life.</em></h2>
+          <p class="lede">Telegram is your pocket inbox. Notion is your long memory. This room keeps their connection honest.</p>
+          <div class="system-line"><span class="pulse"></span><span id="system-state">Checking your private connection…</span></div>
+        </div>
+        <aside class="daily-card">
+          <p class="eyebrow">Daily rhythm</p>
+          <div class="sun-icon" aria-hidden="true">☀</div>
+          <p id="summary-time" class="summary-time">—</p>
+          <p class="small-copy">Your Telegram morning brief is scheduled in your chosen timezone.</p>
+        </aside>
+      </section>
+
+      <section class="status-strip" aria-label="Connection status">
+        <article class="status-item"><span class="status-dot" id="telegram-dot"></span><div><p>Telegram</p><strong id="telegram-status">Checking</strong></div></article>
+        <article class="status-item"><span class="status-dot" id="notion-dot"></span><div><p>Notion</p><strong id="notion-status">Checking</strong></div></article>
+        <article class="status-item"><span class="status-dot" id="ai-dot"></span><div><p>Message parser</p><strong id="ai-status">Checking</strong></div></article>
+        <button class="quiet-button" id="test-connections" type="button">Test connections <span>↗</span></button>
+      </section>
+
+      <section class="workspace-grid">
+        <article class="capture-card">
+          <div class="section-head">
+            <div><p class="eyebrow">Capture desk</p><h3>Try a thought</h3></div>
+            <span class="tag">Private test</span>
+          </div>
+          <form id="capture-form">
+            <label class="sr-only" for="capture-text">A life-manager message</label>
+            <textarea id="capture-text" maxlength="10000" placeholder="e.g. Remind me to renew insurance on August 2, estimated ₹8,000."></textarea>
+            <div class="form-footer"><span>Uses the same rules as your Telegram bot.</span><button class="primary-button" type="submit">Save to Notion <span>→</span></button></div>
+          </form>
+          <pre id="capture-result" class="capture-result" hidden></pre>
+        </article>
+
+        <aside class="reminder-card">
+          <div class="section-head"><div><p class="eyebrow">Next up</p><h3>Reminders</h3></div><span class="calendar-glyph">◷</span></div>
+          <ol id="reminder-list" class="reminder-list"><li class="empty-state">No scheduled reminders yet.</li></ol>
+        </aside>
+      </section>
+
+      <section class="archive-section">
+        <div class="section-head"><div><p class="eyebrow">Activity ledger</p><h3>Recent captures</h3></div><span class="ledger-count" id="capture-count">—</span></div>
+        <div id="capture-list" class="capture-list"><p class="empty-state">Nothing captured from this device yet.</p></div>
+      </section>
+
+      <footer>
+        <span>Personal data belongs in your Notion workspace.</span>
+        <span id="timezone-note">Timezone: —</span>
+      </footer>
+    </main>
+    <script src="/assets/app.js"></script>
+  </body>
+</html>
+
