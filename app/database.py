@@ -56,6 +56,12 @@ class AppDatabase:
                         key TEXT PRIMARY KEY,
                         value TEXT NOT NULL
                     );
+                    CREATE TABLE IF NOT EXISTS message_logs (
+                        id SERIAL PRIMARY KEY,
+                        user_message TEXT NOT NULL,
+                        bot_reply TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    );
                     """
                 )
 
@@ -173,6 +179,29 @@ class AppDatabase:
                     "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
                     (key, value),
                 )
+
+    def log_message(self, user_message: str, bot_reply: str) -> None:
+        if not self.dsn:
+            return
+            
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO message_logs (user_message, bot_reply, created_at) VALUES (%s, %s, %s)",
+                    (user_message, bot_reply, self._now()),
+                )
+
+    def get_message_logs(self, limit: int = 50) -> list[dict]:
+        if not self.dsn:
+            return []
+            
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, user_message, bot_reply, created_at FROM message_logs ORDER BY id DESC LIMIT %s", (limit,)
+                )
+                rows = cur.fetchall()
+        return [dict(row) for row in rows]
 
     @staticmethod
     def _now() -> str:

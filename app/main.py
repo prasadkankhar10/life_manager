@@ -123,6 +123,11 @@ async def dashboard_capture(capture: CaptureRequest) -> dict[str, str]:
     return {"reply": await manager.process_text(capture.text)}
 
 
+@app.get("/api/logs")
+async def dashboard_logs() -> list[dict]:
+    return database.get_message_logs(50)
+
+
 @app.post("/api/test-connections")
 async def test_connections() -> dict[str, Any]:
     result: dict[str, Any] = {"telegram": {"configured": settings.telegram_ready}, "notion": {"configured": settings.notion_ready}}

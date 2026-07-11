@@ -49,12 +49,16 @@ class LifeManager:
     async def process_text(self, raw_text: str) -> str:
         item = await self.parser.parse(raw_text)
         if item.item_type == "help":
-            return HELP_TEXT
-        if item.needs_clarification:
-            return f"I need one detail first: {escape(item.clarification)}"
-        if item.item_type == "query":
-            return await self.answer_query(item)
-        return await self.store_item(item)
+            reply = HELP_TEXT
+        elif item.needs_clarification:
+            reply = f"I need one detail first: {escape(item.clarification)}"
+        elif item.item_type == "query":
+            reply = await self.answer_query(item)
+        else:
+            reply = await self.store_item(item)
+            
+        self.database.log_message(raw_text, reply)
+        return reply
 
     async def store_item(self, item: ParsedItem) -> str:
         if not self.settings.notion_ready:

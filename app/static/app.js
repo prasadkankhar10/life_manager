@@ -47,11 +47,56 @@ function renderStatus(data) {
   });
 }
 
+async function loadLogs() {
+  const list = $('#logs-list');
+  try {
+    const response = await fetch('/api/logs');
+    if (!response.ok) throw new Error('Could not load logs.');
+    const logs = await response.json();
+    list.innerHTML = '';
+    if (!logs.length) {
+      list.innerHTML = '<p class="empty-state">No logs available.</p>';
+      return;
+    }
+    logs.forEach((log) => {
+      const entry = document.createElement('div');
+      entry.className = 'capture-entry';
+      entry.style.display = 'block';
+      entry.style.padding = '0.75rem';
+      
+      const date = document.createElement('div');
+      date.className = 'capture-date';
+      date.textContent = formatDate(log.created_at);
+      date.style.marginBottom = '0.5rem';
+      
+      const req = document.createElement('div');
+      req.innerHTML = `<strong>You:</strong> ${log.user_message.replace(/</g, '&lt;')}`;
+      req.style.marginBottom = '0.25rem';
+      
+      const res = document.createElement('div');
+      res.innerHTML = `<strong>Bot:</strong> ${log.bot_reply.replace(/\\n/g, '<br>')}`;
+      res.style.color = 'var(--text-dim)';
+      
+      entry.append(date, req, res);
+      list.append(entry);
+    });
+  } catch (error) {
+    list.innerHTML = `<p class="empty-state">${error.message}</p>`;
+  }
+}
+
 async function refresh() {
   const response = await fetch('/api/status');
   if (!response.ok) throw new Error('Could not load dashboard status.');
   renderStatus(await response.json());
+  await loadLogs();
 }
+
+$('#refresh-logs').addEventListener('click', () => {
+  const btn = $('#refresh-logs');
+  btn.textContent = 'Loading...';
+  loadLogs().finally(() => { btn.innerHTML = 'Refresh <span>↺</span>'; });
+});
 
 function updateClock() {
   const now = new Date();
