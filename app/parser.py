@@ -36,7 +36,7 @@ CAPTURE_SCHEMA: dict[str, Any] = {
 }
 
 
-class OpenAIExtractor:
+class GeminiExtractor:
     def __init__(self, api_key: str, model: str, timezone) -> None:
         self.api_key = api_key
         self.model = model
@@ -51,36 +51,56 @@ For expenses, extract a numeric amount without currency symbols and use today's 
 For journal entries preserve the writing in body. For information requests use item_type=query and query_kind.
 Never invent dates, amounts, priority, mood, or categories. If an essential ambiguity prevents an action, set needs_clarification=true and ask one brief question in clarification.
 """
-        payload = {
-            "model": self.model,
-            "store": False,
-            "instructions": instructions,
-            "input": message,
-            "text": {
-                "format": {
-                    "type": "json_schema",
-                    "name": "life_manager_capture",
-                    "strict": True,
-                    "schema": CAPTURE_SCHEMA,
-                }
+        gemini_schema = {
+            "type": "object",
+            "properties": {
+                "item_type": {"type": "string", "enum": ["task", "expense", "note", "journal", "goal", "query", "help"]},
+                "title": {"type": "string"},
+                "body": {"type": "string"},
+                "date": {"type": "string"},
+                "reminder_at": {"type": "string"},
+                "amount": {"type": "number", "nullable": True},
+                "category": {"type": "string"},
+                "priority": {"type": "string", "enum": ["None", "High", "Medium", "Low"]},
+                "mood": {"type": "string", "enum": ["None", "Great", "Good", "Okay", "Low"]},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "query_kind": {"type": "string", "enum": ["None", "today", "tasks", "expenses_month", "reminders"]},
+                "needs_clarification": {"type": "boolean"},
+                "clarification": {"type": "string"},
             },
+            "required": [
+                "item_type", "title", "body", "date", "reminder_at", "category", "priority", "mood", "tags",
+                "query_kind", "needs_clarification", "clarification",
+            ]
         }
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        payload = {
+            "system_instruction": {
+                "parts": [{"text": instructions}]
+            },
+            "contents": [{
+                "parts": [{"text": message}]
+            }],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseSchema": gemini_schema,
+            }
+        }
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
+        headers = {"Content-Type": "application/json"}
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post("https://api.openai.com/v1/responses", headers=headers, json=payload)
+            response = await client.post(url, headers=headers, json=payload)
         response.raise_for_status()
         payload = response.json()
-        output_text = payload.get("output_text", "")
-        if not output_text:
-            output_text = "".join(
-                content.get("text", "")
-                for output in payload.get("output", [])
-                for content in output.get("content", [])
-                if content.get("type") == "output_text"
-            )
-        if not output_text:
-            raise ValueError("AI response did not include structured text")
+        
+        try:
+            output_text = payload["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError) as e:
+            raise ValueError(f"AI response did not include structured text: {e}")
+            
         item = ParsedItem(**json.loads(output_text))
+        if item.priority == "None": item.priority = ""
+        if item.mood == "None": item.mood = ""
+        if item.query_kind == "None": item.query_kind = ""
         if item.reminder_at:
             item.reminder_at = _normalise_reminder(item.reminder_at, self.timezone)
         return item
@@ -89,7 +109,7 @@ Never invent dates, amounts, priority, mood, or categories. If an essential ambi
 class MessageParser:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.extractor = OpenAIExtractor(settings.openai_api_key, settings.openai_model, settings.tzinfo) if settings.ai_ready else None
+        self.extractor = GeminiExtractor(settings.gemini_api_key, settings.gemini_model, settings.tzinfo) if settings.ai_ready else None
 
     async def parse(self, message: str) -> ParsedItem:
         clean = message.strip()

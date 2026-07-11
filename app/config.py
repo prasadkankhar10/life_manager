@@ -50,9 +50,9 @@ class Settings:
     notion_notes_data_source_id: str
     notion_journal_data_source_id: str
     notion_goals_data_source_id: str
-    openai_api_key: str
-    openai_model: str
-    openai_enabled: bool
+    gemini_api_key: str
+    gemini_model: str
+    gemini_enabled: bool
     dashboard_password: str
 
     @property
@@ -69,7 +69,7 @@ class Settings:
 
     @property
     def ai_ready(self) -> bool:
-        return self.openai_enabled and bool(self.openai_api_key)
+        return self.gemini_enabled and bool(self.gemini_api_key)
 
     @property
     def data_sources(self) -> dict[str, str]:
@@ -112,8 +112,8 @@ def load_settings() -> Settings:
         notion_notes_data_source_id=_env("NOTION_NOTES_DATA_SOURCE_ID"),
         notion_journal_data_source_id=_env("NOTION_JOURNAL_DATA_SOURCE_ID"),
         notion_goals_data_source_id=_env("NOTION_GOALS_DATA_SOURCE_ID"),
-        openai_api_key=_env("OPENAI_API_KEY"),
-        openai_model=_env("OPENAI_MODEL", "gpt-5-mini"),
-        openai_enabled=_as_bool(_env("OPENAI_ENABLED", "true")),
+        gemini_api_key=_env("GEMINI_API_KEY"),
+        gemini_model=_env("GEMINI_MODEL", "gemini-2.5-flash"),
+        gemini_enabled=_as_bool(_env("GEMINI_ENABLED", "true")),
         dashboard_password=_env("DASHBOARD_PASSWORD"),
     )
