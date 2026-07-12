@@ -49,6 +49,14 @@ class Scheduler:
                         reply_markup=reply_markup
                     )
                 self.manager.database.set_setting(key, "sent")
+        if now.strftime("%H:%M") in ["00:00", "06:00", "12:00", "18:00"]:
+            key = f"process-notes:{now.date().isoformat()}-{now.hour}"
+            if self.manager.database.get_setting(key) is None:
+                try:
+                    await self.manager.process_unprocessed_notes()
+                except Exception:
+                    pass
+                self.manager.database.set_setting(key, "sent")
 
     def stop(self) -> None:
         self._running = False

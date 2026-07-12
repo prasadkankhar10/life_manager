@@ -141,6 +141,8 @@ class LifeManager:
             return await self.today_tasks()
         if item.query_kind == "expenses_month":
             return await self.monthly_expenses()
+        if item.query_kind == "process_notes":
+            return await self.process_unprocessed_notes()
         if item.query_kind == "habit_review":
             user_question = item.body or item.title
             return await self.habit_review(user_question)
@@ -189,6 +191,70 @@ class LifeManager:
         expenses = result.get("results", [])
         total = sum((page.get("properties", {}).get("Amount", {}).get("number") or 0) for page in expenses)
         return f"<b>This month</b>\n{len(expenses)} expenses · ₹{total:,.2f}"
+
+    async def process_unprocessed_notes(self) -> str:
+        if not self.settings.ai_ready or not self.settings.notion_ready:
+            return "AI or Notion is not configured. Cannot process notes."
+            
+        data_source_id = self.settings.notion_notes_data_source_id
+        payload = {
+            "filter": {
+                "property": "Tags",
+                "multi_select": {"does_not_contain": "Processed"}
+            },
+            "page_size": 20
+        }
+        
+        try:
+            result = await self.notion.query_data_source(data_source_id, payload)
+        except NotionError as e:
+            return f"Failed to query notes: {escape(str(e))}"
+            
+        pages = result.get("results", [])
+        if not pages:
+            return "No unprocessed notes found!"
+            
+        import httpx
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.settings.gemini_model}:generateContent?key={self.settings.gemini_api_key}"
+        
+        processed_count = 0
+        actions_taken = []
+        
+        for p in pages:
+            page_id = p["id"]
+            props = p.get("properties", {})
+            note_text = "".join(part.get("plain_text", "") for part in props.get("Name", {}).get("title", []))
+            
+            prompt = f"Analyze the following note. Does it contain a hidden actionable item (like a task, expense, goal, or habit log)? Note: \"{note_text}\"\nIf yes, output ONLY the natural language string to log it (e.g., 'Buy milk tomorrow', 'Spent 450 on dinner', 'mark habit ran 5k'). If it is just a normal thought, idea, or reference note with no action needed, output exactly 'NONE'."
+            
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(url, json={"contents": [{"parts": [{"text": prompt}]}]})
+                resp.raise_for_status()
+                ai_reply = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                
+                if ai_reply != "NONE":
+                    # Re-parse the AI's simplified action string and store it!
+                    # We create a new item through parser and store it directly without sending to Telegram.
+                    extracted_item = await self.parser.parse(ai_reply)
+                    if extracted_item.item_type not in ["note", "query", "help"]:
+                        await self.store_item(extracted_item)
+                        actions_taken.append(f"• Converted: <i>{escape(note_text)}</i> ➡️ <b>{extracted_item.item_type.title()}</b>: {escape(extracted_item.title)}")
+                
+                # Tag the note as Processed
+                old_tags = [t.get("name") for t in props.get("Tags", {}).get("multi_select", [])]
+                new_tags = list(set(old_tags + ["Processed"]))
+                await self.notion.update_page(page_id, {"Tags": multi_select(new_tags)})
+                processed_count += 1
+                
+            except Exception as e:
+                import logging
+                logging.error(f"Failed to process note {page_id}: {e}", exc_info=True)
+                
+        if not actions_taken:
+            return f"Processed {processed_count} notes. No actionable items found."
+        
+        return f"Processed {processed_count} notes.\n<b>Actions taken:</b>\n" + "\n".join(actions_taken)
 
     async def habit_review(self, user_question: str = "") -> str:
         if not self.settings.ai_ready:

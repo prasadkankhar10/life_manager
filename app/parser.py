@@ -49,7 +49,7 @@ Classify the message and return only the requested JSON schema. Convert relative
 For a task use date for its due date. For an explicit “remind me” request, set reminder_at to an ISO 8601 datetime with timezone; if the user gave a date but no time, use 09:00 in their timezone. If no date can be inferred, ask one brief clarification question.
 For expenses, extract a numeric amount without currency symbols and use today's date if the user says today or gives no date.
 For journal entries preserve the writing in body. For information requests use item_type=query and query_kind.
-For tracking/logging habits, use item_type=habit. For questions or reviews about habits (e.g. 'how are my habits', 'what habits left today'), use item_type=query and query_kind=habit_review.
+For tracking/logging habits (including imperative commands like 'mark habit', 'log habit', 'I ran', etc.), use item_type=habit. For questions or reviews about habits (e.g. 'how are my habits', 'what habits left today'), use item_type=query and query_kind=habit_review.
 Never invent dates, amounts, priority, mood, or categories. If an essential ambiguity prevents an action, set needs_clarification=true and ask one brief question in clarification.
 """
         gemini_schema = {
@@ -65,7 +65,7 @@ Never invent dates, amounts, priority, mood, or categories. If an essential ambi
                 "priority": {"type": "string", "enum": ["None", "High", "Medium", "Low"]},
                 "mood": {"type": "string", "enum": ["None", "Great", "Good", "Okay", "Low"]},
                 "tags": {"type": "array", "items": {"type": "string"}},
-                "query_kind": {"type": "string", "enum": ["None", "today", "tasks", "expenses_month", "reminders", "habit_review"]},
+                "query_kind": {"type": "string", "enum": ["None", "today", "tasks", "expenses_month", "reminders", "habit_review", "process_notes"]},
                 "creative_skill_minutes": {"type": "number", "nullable": True},
                 "dsa_minutes": {"type": "number", "nullable": True},
                 "deep_work_minutes": {"type": "number", "nullable": True},
@@ -152,6 +152,8 @@ class MessageParser:
             return ParsedItem("query", "Today's tasks", query_kind="today")
         if command == "/summary":
             return ParsedItem("query", "Monthly expenses", query_kind="expenses_month")
+        if command == "/process_notes":
+            return ParsedItem("query", "Process notes", query_kind="process_notes")
         if command == "/reminders":
             return ParsedItem("query", "Upcoming reminders", query_kind="reminders")
         if command == "/task":

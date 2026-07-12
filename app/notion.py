@@ -143,7 +143,7 @@ def database_schemas() -> dict[str, dict[str, Any]]:
         "note": {
             "Name": {"type": "title", "title": {}},
             "Type": {"type": "select", "select": {"options": [{"name": "Note", "color": "blue"}, {"name": "Idea", "color": "purple"}, {"name": "Reference", "color": "gray"}]}},
-            "Tags": {"type": "multi_select", "multi_select": {"options": []}},
+            "Tags": {"type": "multi_select", "multi_select": {"options": [{"name": "Processed", "color": "green"}]}},
             "Date": {"type": "date", "date": {}},
             "Source": source,
         },
