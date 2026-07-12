@@ -35,7 +35,8 @@ Useful commands:
 /note An idea worth keeping
 /journal A reflection
 /goal Run a half marathon
-/today  /summary  /reminders"""
+/habit Open habit tracker
+/today  /summary  /reminders  /process_notes"""
 
 
 class LifeManager:
