@@ -203,10 +203,18 @@ class LifeManager:
         data_source_id = self.settings.notion_notes_data_source_id
         payload = {
             "filter": {
-                "property": "Tags",
-                "multi_select": {"does_not_contain": "Processed"}
+                "or": [
+                    {
+                        "property": "Tags",
+                        "multi_select": {"is_empty": True}
+                    },
+                    {
+                        "property": "Tags",
+                        "multi_select": {"does_not_contain": "Processed"}
+                    }
+                ]
             },
-            "page_size": 20
+            "page_size": 100
         }
         
         try:
