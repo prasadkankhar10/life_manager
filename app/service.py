@@ -142,7 +142,8 @@ class LifeManager:
         if item.query_kind == "expenses_month":
             return await self.monthly_expenses()
         if item.query_kind == "habit_review":
-            return await self.habit_review()
+            user_question = item.body or item.title
+            return await self.habit_review(user_question)
         return HELP_TEXT
 
     async def today_tasks(self) -> str:
@@ -189,7 +190,7 @@ class LifeManager:
         total = sum((page.get("properties", {}).get("Amount", {}).get("number") or 0) for page in expenses)
         return f"<b>This month</b>\n{len(expenses)} expenses · ₹{total:,.2f}"
 
-    async def habit_review(self) -> str:
+    async def habit_review(self, user_question: str = "") -> str:
         if not self.settings.ai_ready:
             return "AI is not enabled. Cannot generate habit review."
             
@@ -210,37 +211,52 @@ class LifeManager:
             return f"I could not read your habits: {escape(str(error))}"
             
         pages = result.get("results", [])
+        
+        habit_categories = [
+            "Creative Skill", "DSA / Software Engineering", "Deep Work", 
+            "English Practice / Reading", "Exercise Time", "Game Dev", 
+            "Energy Level", "Fab / Impulse Urge", "Mood"
+        ]
+        
         if not pages:
-            return "You haven't logged any habits in the past 7 days to review!"
+            habit_text = "No habits logged in the past 7 days."
+        else:
+            lines = []
+            for p in pages:
+                props = p.get("properties", {})
+                date = props.get("Date", {}).get("date", {}).get("start", "")
+                def get_num(prop): return props.get(prop, {}).get("number") or 0
+                
+                line = f"Date: {date}"
+                cs = get_num("Creative Skill")
+                dsa = get_num("DSA / Software Engineering")
+                dw = get_num("Deep Work")
+                eng = get_num("English Practice / Reading")
+                ex = get_num("Exercise Time")
+                gd = get_num("Game Dev")
+                energy = props.get("Energy Level", {}).get("select", {}).get("name", "") if props.get("Energy Level", {}).get("select") else ""
+                impulse = props.get("Fab / Impulse Urge", {}).get("select", {}).get("name", "") if props.get("Fab / Impulse Urge", {}).get("select") else ""
+                moods = [t.get("name") for t in props.get("Mood", {}).get("multi_select", [])]
+                
+                if cs: line += f", Creative: {cs}m"
+                if dsa: line += f", DSA: {dsa}m"
+                if dw: line += f", DeepWork: {dw}m"
+                if eng: line += f", English: {eng}m"
+                if ex: line += f", Exercise: {ex}m"
+                if gd: line += f", GameDev: {gd}m"
+                if energy: line += f", Energy: {energy}"
+                if impulse: line += f", Impulse: {impulse}"
+                if moods: line += f", Mood: {', '.join(moods)}"
+                lines.append(line)
+                
+            habit_text = "\n".join(lines)
             
-        lines = []
-        for p in pages:
-            props = p.get("properties", {})
-            date = props.get("Date", {}).get("date", {}).get("start", "")
-            def get_num(prop): return props.get(prop, {}).get("number") or 0
-            
-            line = f"Date: {date}"
-            cs = get_num("Creative Skill")
-            dsa = get_num("DSA / Software Engineering")
-            dw = get_num("Deep Work")
-            eng = get_num("English Practice / Reading")
-            ex = get_num("Exercise Time")
-            gd = get_num("Game Dev")
-            energy = props.get("Energy Level", {}).get("select", {}).get("name", "") if props.get("Energy Level", {}).get("select") else ""
-            impulse = props.get("Fab / Impulse Urge", {}).get("select", {}).get("name", "") if props.get("Fab / Impulse Urge", {}).get("select") else ""
-            
-            if cs: line += f", Creative: {cs}m"
-            if dsa: line += f", DSA: {dsa}m"
-            if dw: line += f", DeepWork: {dw}m"
-            if eng: line += f", English: {eng}m"
-            if ex: line += f", Exercise: {ex}m"
-            if gd: line += f", GameDev: {gd}m"
-            if energy: line += f", Energy: {energy}"
-            if impulse: line += f", Impulse: {impulse}"
-            lines.append(line)
-            
-        habit_text = "\n".join(lines)
-        prompt = f"Here is my habit tracking data for the last 7 days:\n{habit_text}\n\nAnalyze this data and provide a brief, encouraging review of my progress. Highlight 1 or 2 specific areas I can improve on. Keep it short (max 4 sentences)."
+        system_instruction = f"Here is my habit tracking data for the last 7 days:\n{habit_text}\n\nThe available habit categories I track are: {', '.join(habit_categories)}.\n"
+        
+        if user_question and user_question.lower() not in ("habit_review", "habit review"):
+            prompt = system_instruction + f"\nUser asked: '{user_question}'. Please answer this directly based on the habit data. If they ask what's left today, compare today's logged data against the available categories. Keep the answer brief and encouraging."
+        else:
+            prompt = system_instruction + "\nAnalyze this data and provide a brief, encouraging review of my progress. Highlight 1 or 2 specific areas I can improve on. Keep it short (max 4 sentences)."
         
         import httpx
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.settings.gemini_model}:generateContent?key={self.settings.gemini_api_key}"
@@ -249,7 +265,7 @@ class LifeManager:
                 resp = await client.post(url, json={"contents": [{"parts": [{"text": prompt}]}]})
             resp.raise_for_status()
             ai_reply = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-            return f"<b>Weekly Habit Review</b>\n\n{escape(ai_reply)}"
+            return f"<b>Habit Info</b>\n\n{escape(ai_reply)}"
         except Exception as e:
             import logging
             logging.error(f"Habit review AI failed: {e}", exc_info=True)
