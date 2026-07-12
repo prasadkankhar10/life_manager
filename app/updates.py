@@ -86,6 +86,24 @@ class TelegramUpdateHandler:
             return
         if not self.database.update_is_new(update_id):
             return
+            
+        if text.strip() == "/habit":
+            reply_text = "Select a habit to log:"
+            reply_markup = {
+                "inline_keyboard": [
+                    [{"text": "Creative Skill", "callback_data": "cat_Creative Skill"}, {"text": "DSA", "callback_data": "cat_DSA"}],
+                    [{"text": "Deep Work", "callback_data": "cat_Deep Work"}, {"text": "English", "callback_data": "cat_English"}],
+                    [{"text": "Exercise", "callback_data": "cat_Exercise"}, {"text": "Game Dev", "callback_data": "cat_Game Dev"}],
+                    [{"text": "Energy Level", "callback_data": "cat_Energy"}, {"text": "Impulse Urge", "callback_data": "cat_Impulse"}],
+                    [{"text": "Mood", "callback_data": "cat_Mood"}],
+                ]
+            }
+            try:
+                await self.manager.telegram.send_message(int(chat["id"]), reply_text, reply_markup=reply_markup)
+            except Exception:
+                pass
+            return
+            
         try:
             reply = await self.manager.process_text(text)
         except Exception:
