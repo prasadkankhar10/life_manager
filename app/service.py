@@ -36,6 +36,7 @@ Useful commands:
 /journal A reflection
 /goal Run a half marathon
 /habit Open habit tracker
+/review [target] AI review of data
 /today  /summary  /reminders  /process_notes"""
 
 
@@ -144,6 +145,8 @@ class LifeManager:
             return await self.monthly_expenses()
         if item.query_kind == "process_notes":
             return await self.process_unprocessed_notes()
+        if item.query_kind == "review":
+            return await self.comprehensive_review(item.body or "all")
         if item.query_kind == "habit_review":
             user_question = item.body or item.title
             return await self.habit_review(user_question)
@@ -257,65 +260,6 @@ class LifeManager:
         
         return f"Processed {processed_count} notes.\n<b>Actions taken:</b>\n" + "\n".join(actions_taken)
 
-    async def general_review(self, time_range: str) -> str:
-        if not self.settings.ai_ready:
-            return "AI is not enabled. Cannot generate review."
-        
-        today = datetime.strptime(self.settings.logical_today(), "%Y-%m-%d").date()
-        if time_range == "today":
-            start_date = today.isoformat()
-        elif time_range == "7days":
-            start_date = (today - timedelta(days=7)).isoformat()
-        elif time_range == "month":
-            start_date = today.replace(day=1).isoformat()
-        else:
-            start_date = "2000-01-01"  # all
-
-        try:
-            # Query Tasks
-            task_payload = {
-                "filter": {"and": [
-                    {"property": "Created", "date": {"on_or_after": start_date}},
-                ]},
-                "page_size": 50,
-            }
-            tasks_result = await self.notion.query_data_source(self.settings.notion_tasks_data_source_id, task_payload)
-            tasks = [extract_page_title(p) for p in tasks_result.get("results", [])]
-
-            # Query Habits
-            habit_payload = {
-                "filter": {"property": "Date", "date": {"on_or_after": start_date}},
-                "page_size": 50,
-            }
-            habits_result = await self.notion.query_data_source(self.settings.notion_habits_data_source_id, habit_payload)
-            habits = []
-            for p in habits_result.get("results", []):
-                date = p.get("properties", {}).get("Date", {}).get("date", {}).get("start", "")
-                if date: habits.append(date)
-
-            # Query Expenses
-            expense_payload = {
-                "filter": {"property": "Date", "date": {"on_or_after": start_date}},
-                "page_size": 50,
-            }
-            expenses_result = await self.notion.query_data_source(self.settings.notion_expenses_data_source_id, expense_payload)
-            expenses = sum((p.get("properties", {}).get("Amount", {}).get("number") or 0) for p in expenses_result.get("results", []))
-            
-            data_summary = f"Data since {start_date}:\n- Tasks Created: {len(tasks)}\n- Task Names: {', '.join(tasks[:20])}\n- Habit Logs Recorded: {len(habits)}\n- Total Expenses: ₹{expenses}\n"
-            prompt = f"Here is my life manager data:\n{data_summary}\nAnalyze this data and provide a brief, encouraging review of my life management. Give some insights or suggestions. Keep it short and readable."
-            
-            import httpx
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.settings.gemini_model}:generateContent?key={self.settings.gemini_api_key}"
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(url, json={"contents": [{"parts": [{"text": prompt}]}]})
-            resp.raise_for_status()
-            ai_reply = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-            return f"<b>AI Review ({time_range})</b>\n\n{escape(ai_reply)}"
-        except Exception as e:
-            import logging
-            logging.error(f"General review failed: {e}", exc_info=True)
-            return "Sorry, I couldn't generate the review right now."
-
     async def habit_review(self, user_question: str = "") -> str:
         if not self.settings.ai_ready:
             return "AI is not enabled. Cannot generate habit review."
@@ -396,6 +340,102 @@ class LifeManager:
             import logging
             logging.error(f"Habit review AI failed: {e}", exc_info=True)
             return "Sorry, I couldn't generate an AI review right now."
+
+    async def comprehensive_review(self, target: str) -> str:
+        if not self.settings.ai_ready or not self.settings.notion_ready:
+            return "AI or Notion is not configured."
+            
+        target = target.lower().strip()
+        if not target:
+            target = "all"
+            
+        today_date = datetime.strptime(self.settings.logical_today(), "%Y-%m-%d").date()
+        week_ago_iso = (today_date - timedelta(days=7)).isoformat()
+        month_start_iso = today_date.replace(day=1).isoformat()
+        
+        import asyncio
+        async def fetch(ds_id, date_prop, after_date):
+            if not ds_id: return []
+            payload = {
+                "filter": {"and": [
+                    {"property": date_prop, "date": {"on_or_after": after_date}},
+                    {"property": date_prop, "date": {"on_or_before": today_date.isoformat()}}
+                ]},
+                "page_size": 50
+            }
+            try:
+                res = await self.notion.query_data_source(ds_id, payload)
+                return res.get("results", [])
+            except:
+                return []
+
+        t_tasks = fetch(self.settings.notion_tasks_data_source_id, "Due", week_ago_iso) if target in ["all", "tasks", "task"] else asyncio.sleep(0)
+        t_expenses = fetch(self.settings.notion_expenses_data_source_id, "Date", month_start_iso) if target in ["all", "expenses", "expense"] else asyncio.sleep(0)
+        t_habits = fetch(self.settings.notion_habits_data_source_id, "Date", week_ago_iso) if target in ["all", "habits", "habit"] else asyncio.sleep(0)
+        t_journals = fetch(self.settings.notion_journal_data_source_id, "Date", week_ago_iso) if target in ["all", "journal", "journals", "notes", "note"] else asyncio.sleep(0)
+        
+        results = await asyncio.gather(t_tasks, t_expenses, t_habits, t_journals)
+        t_res = results[0] if results[0] else []
+        e_res = results[1] if results[1] else []
+        h_res = results[2] if results[2] else []
+        j_res = results[3] if results[3] else []
+        
+        data_text = ""
+        
+        if t_res:
+            data_text += "TASKS (Last 7 Days):\n"
+            for r in t_res:
+                props = r.get("properties", {})
+                title = extract_page_title(r)
+                status = props.get("Status", {}).get("select", {}).get("name", "")
+                data_text += f"- {title} [{status}]\n"
+                
+        if e_res:
+            data_text += "\nEXPENSES (This Month):\n"
+            for r in e_res:
+                props = r.get("properties", {})
+                title = extract_page_title(r)
+                amt = props.get("Amount", {}).get("number", 0)
+                cat = props.get("Category", {}).get("select", {}).get("name", "")
+                data_text += f"- {title}: INR {amt} ({cat})\n"
+                
+        if h_res:
+            data_text += "\nHABITS (Last 7 Days):\n"
+            for r in h_res:
+                props = r.get("properties", {})
+                date = props.get("Date", {}).get("date", {}).get("start", "")
+                cs = props.get("Creative Skill", {}).get("number") or 0
+                dsa = props.get("DSA / Software Engineering", {}).get("number") or 0
+                dw = props.get("Deep Work", {}).get("number") or 0
+                eng = props.get("English Practice / Reading", {}).get("number") or 0
+                ex = props.get("Exercise Time", {}).get("number") or 0
+                gd = props.get("Game Dev", {}).get("number") or 0
+                data_text += f"- {date}: CS:{cs}m, DSA:{dsa}m, DeepWork:{dw}m, Eng:{eng}m, Ex:{ex}m, GameDev:{gd}m\n"
+                
+        if j_res:
+            data_text += "\nJOURNALS (Last 7 Days):\n"
+            for r in j_res:
+                title = extract_page_title(r)
+                mood = r.get("properties", {}).get("Mood", {}).get("select", {}).get("name", "")
+                data_text += f"- {title} [Mood: {mood}]\n"
+
+        if not data_text:
+            return f"I couldn't find any data for '{target}' in the recent timeframe."
+
+        prompt = f"You are a life coach. Here is the user's data for '{target}':\n\n{data_text}\n\nProvide a comprehensive, encouraging review. Highlight wins, spot trends, and give 1 or 2 actionable tips for improvement. Keep it highly readable with bullet points. Max 6 sentences."
+        
+        import httpx
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.settings.gemini_model}:generateContent?key={self.settings.gemini_api_key}"
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(url, json={"contents": [{"parts": [{"text": prompt}]}]})
+            resp.raise_for_status()
+            ai_reply = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+            return f"<b>AI Review: {target.title()}</b>\n\n{escape(ai_reply)}"
+        except Exception as e:
+            import logging
+            logging.error(f"Review AI failed: {e}", exc_info=True)
+            return "Sorry, the AI review failed to generate."
 
     async def _update_or_create_habit(self, item: ParsedItem) -> str:
         data_source_id = self.settings.data_sources["habit"]

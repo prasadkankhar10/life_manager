@@ -46,9 +46,6 @@ class TelegramClient:
 
     async def delete_webhook(self) -> Any:
         return await self.call("deleteWebhook", {"drop_pending_updates": False})
-        
-    async def set_my_commands(self, commands: list[dict[str, str]]) -> Any:
-        return await self.call("setMyCommands", {"commands": commands})
 
     async def get_updates(self, offset: int | None) -> list[dict[str, Any]]:
         payload: dict[str, Any] = {"timeout": 25, "allowed_updates": ["message", "callback_query"]}

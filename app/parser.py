@@ -154,10 +154,10 @@ class MessageParser:
             return ParsedItem("query", "Monthly expenses", query_kind="expenses_month")
         if command == "/process_notes":
             return ParsedItem("query", "Process notes", query_kind="process_notes")
+        if command == "/review":
+            return ParsedItem("query", "Review", query_kind="review", body=rest)
         if command == "/reminders":
             return ParsedItem("query", "Upcoming reminders", query_kind="reminders")
-        if command == "/review":
-            return ParsedItem("query", "General AI Review", query_kind="review", body=rest)
         if command == "/task":
             return ParsedItem("task", rest or "Untitled task", body=rest)
         if command == "/note":
