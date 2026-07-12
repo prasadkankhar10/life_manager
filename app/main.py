@@ -32,6 +32,18 @@ poller = TelegramPoller(manager.telegram, update_handler)
 async def lifespan(_: FastAPI):
     database.initialize()
     scheduler_task = asyncio.create_task(scheduler.run())
+    if manager.telegram.configured:
+        try:
+            await manager.telegram.set_my_commands([
+                {"command": "habit", "description": "Log a habit or check progress"},
+                {"command": "review", "description": "Get an AI review of your Notion data"},
+                {"command": "today", "description": "View today's tasks"},
+                {"command": "summary", "description": "View this month's expenses"},
+            ])
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to set Telegram commands: {e}")
+
     poller_task = (
         asyncio.create_task(poller.run())
         if settings.telegram_mode == "polling" and manager.telegram.configured

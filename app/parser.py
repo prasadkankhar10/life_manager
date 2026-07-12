@@ -65,7 +65,7 @@ Never invent dates, amounts, priority, mood, or categories. If an essential ambi
                 "priority": {"type": "string", "enum": ["None", "High", "Medium", "Low"]},
                 "mood": {"type": "string", "enum": ["None", "Great", "Good", "Okay", "Low"]},
                 "tags": {"type": "array", "items": {"type": "string"}},
-                "query_kind": {"type": "string", "enum": ["None", "today", "tasks", "expenses_month", "reminders", "habit_review", "process_notes"]},
+                "query_kind": {"type": "string", "enum": ["None", "today", "tasks", "expenses_month", "reminders", "habit_review", "process_notes", "review"]},
                 "creative_skill_minutes": {"type": "number", "nullable": True},
                 "dsa_minutes": {"type": "number", "nullable": True},
                 "deep_work_minutes": {"type": "number", "nullable": True},
@@ -156,6 +156,8 @@ class MessageParser:
             return ParsedItem("query", "Process notes", query_kind="process_notes")
         if command == "/reminders":
             return ParsedItem("query", "Upcoming reminders", query_kind="reminders")
+        if command == "/review":
+            return ParsedItem("query", "General AI Review", query_kind="review", body=rest)
         if command == "/task":
             return ParsedItem("task", rest or "Untitled task", body=rest)
         if command == "/note":
