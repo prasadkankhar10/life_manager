@@ -195,13 +195,19 @@ class MessageParser:
         return ParsedItem("note", _short_title(message, "Note"), body=message, date=_today(self.settings))
 
     def _expense(self, message: str, force: bool = False) -> ParsedItem:
-        amount = _amount(message)
+        amount = _amount(message, force=force)
         if amount is None and force:
             return ParsedItem(
                 "expense", "Expense", body=message, needs_clarification=True,
                 clarification="What amount should I record for this expense?",
             )
-        remainder = re.sub(r"(?:₹|rs\.?|inr|\$)\s*[\d,]+(?:\.\d{1,2})?", "", message, flags=re.I).strip(" -:.")
+        
+        remainder = re.sub(r"(?:₹|rs\.?|inr|\$)\s*[\d,]+(?:\.\d{1,2})?|[\d,]+(?:\.\d{1,2})?\s*(?:₹|rs\.?|inr|\$)", "", message, flags=re.I)
+        if force and amount is not None:
+            # Strip the raw number if we fell back to grabbing the first number
+            remainder = re.sub(r"[\d,]+(?:\.\d{1,2})?", "", remainder, count=1)
+        
+        remainder = remainder.strip(" -:.")
         category = _category(remainder)
         return ParsedItem(
             "expense", _short_title(remainder or "Expense", "Expense"), body=message,
@@ -240,11 +246,21 @@ def _normalise_reminder(value: str, timezone) -> str:
     return parsed.isoformat()
 
 
-def _amount(message: str) -> float | None:
-    match = re.search(r"(?:₹|rs\.?|inr|\$)\s*([\d,]+(?:\.\d{1,2})?)", message, flags=re.I)
-    if not match:
-        return None
-    return float(match.group(1).replace(",", ""))
+def _amount(message: str, force: bool = False) -> float | None:
+    match1 = re.search(r"(?:₹|rs\.?|inr|\$)\s*([\d,]+(?:\.\d{1,2})?)", message, flags=re.I)
+    if match1:
+        return float(match1.group(1).replace(",", ""))
+        
+    match2 = re.search(r"([\d,]+(?:\.\d{1,2})?)\s*(?:₹|rs\.?|inr|\$)", message, flags=re.I)
+    if match2:
+        return float(match2.group(1).replace(",", ""))
+        
+    if force:
+        match3 = re.search(r"([\d,]+(?:\.\d{1,2})?)", message)
+        if match3:
+            return float(match3.group(1).replace(",", ""))
+            
+    return None
 
 
 def _category(value: str) -> str:
